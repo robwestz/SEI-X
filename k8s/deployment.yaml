@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sie-x
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sie-x-config
+  namespace: sie-x
+data:
+  ENGINE_MODE: "balanced"
+  CACHE_SIZE: "10000"
+  MAX_BATCH_SIZE: "32"
+  LOG_LEVEL: "INFO"
+  ENABLE_MONITORING: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sie-x-secrets
+  namespace: sie-x
+type: Opaque
+data:
+  redis-password: <base64-encoded-password>
+  neo4j-password: <base64-encoded-password>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sie-x-api
+  namespace: sie-x
+  labels:
+    app: sie-x-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sie-x-api
+  template:
+    metadata:
+      labels:
+        app: sie-x-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - sie-x-api
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: sie-x-api
+        image: sie-x:v3.0.0
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 9090
+          name: metrics
+        env:
+        - name: ENGINE_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: sie-x-config
+              key: ENGINE_MODE
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sie-x-secrets
+              key: redis-password
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 5
+        volumeMounts:
+        - name: model-cache
+          mountPath: /models
+        - name: tmp-volume
+          mountPath: /tmp
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      - name: tmp-volume
+        emptyDir:
+          sizeLimit: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sie-x-api
+  namespace: sie-x
+spec:
+  selector:
+    app: sie-x-api
+  ports:
+  - port: 80
+    targetPort: 8000
+    name: http
+  - port: 9090
+    targetPort: 9090
+    name: metrics
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sie-x-hpa
+  namespace: sie-x
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sie-x-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: sie_x_active_operations
+      target:
+        type: AverageValue
+        averageValue: "30"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sie-x-ingress
+  namespace: sie-x
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+spec:
+  tls:
+  - hosts:
+    - api.sie-x.example.com
+    secretName: sie-x-tls
+  rules:
+  - host: api.sie-x.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sie-x-api
+            port:
+              number: 80
