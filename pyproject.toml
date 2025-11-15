@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "sie-x"
+version = "3.0.0"
+description = "Semantic Intelligence Engine X - Enterprise-grade keyword extraction and analysis"
+authors = ["SIE-X Team <team@sie-x.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+torch = "^2.0.0"
+sentence-transformers = "^2.2.0"
+fastapi = "^0.100.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
