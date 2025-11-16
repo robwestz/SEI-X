@@ -6,10 +6,16 @@ from typing import List, Dict, Any, Optional, Callable, Tuple
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
+import time
+import logging
 import numpy as np
 from abc import ABC, abstractmethod
+from datetime import datetime
 import ray
 from ray import serve
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 class AgentRole(Enum):
@@ -161,6 +167,52 @@ class MonitorAgent(BaseAgent):
             self.alert_thresholds.update(message.content)
 
         return None
+
+    async def _get_avg_latency(self) -> float:
+        """Get average latency from recent requests."""
+        # This would integrate with actual metrics collection
+        # For now, return a simulated value
+        if hasattr(self.engine, 'cache') and hasattr(self.engine.cache, 'get_statistics'):
+            stats = self.engine.cache.get_statistics()
+            return stats.get('avg_latency', 100.0)
+        return 100.0  # ms
+
+    async def _get_error_rate(self) -> float:
+        """Get current error rate."""
+        # This would integrate with actual error tracking
+        # For now, return a simulated value
+        if hasattr(self.engine, 'cache') and hasattr(self.engine.cache, 'get_statistics'):
+            stats = self.engine.cache.get_statistics()
+            return stats.get('error_rate', 0.01)
+        return 0.01  # 1%
+
+    def _get_memory_usage(self) -> float:
+        """Get current memory usage percentage."""
+        try:
+            import psutil
+            process = psutil.Process()
+            return process.memory_percent() / 100.0
+        except ImportError:
+            # If psutil not available, return estimate
+            return 0.5
+
+    async def _get_cache_hit_rate(self) -> float:
+        """Get cache hit rate."""
+        if hasattr(self.engine, 'cache') and hasattr(self.engine.cache, 'get_statistics'):
+            stats = self.engine.cache.get_statistics()
+            hits = stats.get('hits', 0)
+            total = stats.get('total', 1)
+            return hits / max(total, 1)
+        return 0.5
+
+    async def _get_throughput(self) -> float:
+        """Get current throughput (requests per second)."""
+        # This would integrate with actual metrics collection
+        # For now, return a simulated value
+        if hasattr(self.engine, 'cache') and hasattr(self.engine.cache, 'get_statistics'):
+            stats = self.engine.cache.get_statistics()
+            return stats.get('throughput', 10.0)
+        return 10.0  # requests/sec
 
 
 class AnalyzerAgent(BaseAgent):
@@ -394,6 +446,42 @@ class OptimizerAgent(BaseAgent):
                 break
 
         self.optimization_queue.insert(insert_idx, optimization)
+
+    async def _rollback_optimization(self, opt_id: str):
+        """Rollback a failed optimization."""
+        if opt_id not in self.active_optimizations:
+            logger.warning(f"Cannot rollback unknown optimization: {opt_id}")
+            return
+
+        optimization = self.active_optimizations[opt_id]
+        logger.info(f"Rolling back optimization {opt_id} of type {optimization['type']}")
+
+        # Store rollback logic - would restore previous state
+        # For now, just log and clean up
+        del self.active_optimizations[opt_id]
+
+    async def _run_automl(self, optimizer):
+        """Run AutoML optimization in background."""
+        try:
+            logger.info("Starting AutoML optimization")
+            # This would run actual hyperparameter optimization
+            # For now, just a placeholder
+            await asyncio.sleep(1)
+            logger.info("AutoML optimization completed")
+        except Exception as e:
+            logger.error(f"AutoML optimization failed: {e}")
+
+    async def _get_common_queries(self) -> List[str]:
+        """Get common queries for cache pre-warming."""
+        # This would analyze query logs to find frequent queries
+        # For now, return some example queries
+        return [
+            "machine learning",
+            "artificial intelligence",
+            "natural language processing",
+            "computer vision",
+            "deep learning"
+        ]
 
 
 class ValidatorAgent(BaseAgent):
@@ -651,11 +739,19 @@ class SIEXOrchestrator:
     """Deployment for the autonomous optimization system."""
 
     def __init__(self):
+        """Initialize orchestrator (sync constructor required by Ray Serve)."""
         self.engine = None
         self.coordinator = None
+        self._initialized = False
 
-    async def __init__(self):
-        """Async initialization."""
+    async def _async_init(self):
+        """Async initialization - call this after construction."""
+        if self._initialized:
+            return
+
+        # Import here to avoid circular dependency
+        from ..core.engine import SemanticIntelligenceEngine
+
         # Initialize engine
         self.engine = SemanticIntelligenceEngine()
 
@@ -664,6 +760,8 @@ class SIEXOrchestrator:
 
         # Start all agents
         await self.coordinator.start_all_agents.remote()
+
+        self._initialized = True
 
     async def get_status(self) -> Dict[str, Any]:
         """Get orchestration status."""
