@@ -11,7 +11,7 @@ import spacy
 from sentence_transformers import SentenceTransformer
 import networkx as nx
 import numpy as np
-from typing import List, Dict, Tuple, Optional, Set
+from typing import List, Dict, Tuple, Optional, Set, Any
 import logging
 import hashlib
 import time
@@ -297,15 +297,23 @@ class SimpleSemanticEngine:
         for i, keyword in enumerate(keywords):
             graph.add_node(i, keyword=keyword)
         
-        # Add edges based on cosine similarity
+        # Add edges based on cosine similarity (vectorized for performance)
         n = len(keywords)
+        if n < 2:
+            return graph
+
+        # Normalize embeddings to unit vectors for efficient cosine similarity calculation
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        # Use a small epsilon to avoid division by zero for zero-vectors
+        normalized_embeddings = np.divide(embeddings, norms, out=np.zeros_like(embeddings), where=norms!=0)
+
+        # Compute cosine similarity matrix
+        similarity_matrix = np.dot(normalized_embeddings, normalized_embeddings.T)
+
+        # Add edges from the upper triangle of the similarity matrix
         for i in range(n):
             for j in range(i + 1, n):
-                # Cosine similarity
-                similarity = np.dot(embeddings[i], embeddings[j]) / (
-                    np.linalg.norm(embeddings[i]) * np.linalg.norm(embeddings[j])
-                )
-                
+                similarity = similarity_matrix[i, j]
                 if similarity > similarity_threshold:
                     graph.add_edge(i, j, weight=float(similarity))
         
@@ -361,7 +369,7 @@ class SimpleSemanticEngine:
         self.embedding_cache.clear()
         logger.info("Embedding cache cleared")
     
-    def get_stats(self) -> Dict[str, any]:
+    def get_stats(self) -> Dict[str, Any]:
         """Get engine statistics."""
         return {
             "model_name": self.model_name,

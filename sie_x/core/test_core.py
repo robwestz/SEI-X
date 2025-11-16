@@ -92,13 +92,13 @@ class MockSentenceTransformer:
     ) -> np.ndarray:
         """Return mock embeddings."""
         # Create random embeddings (deterministic for testing)
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         n = len(sentences) if isinstance(sentences, list) else 1
-        embeddings = np.random.randn(n, 384)  # 384-dim like all-MiniLM
-        
+        embeddings = rng.standard_normal((n, 384))  # 384-dim like all-MiniLM
+
         # Normalize to unit vectors
         embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        
+
         return embeddings
 
 
@@ -597,7 +597,4 @@ def mock_engine():
 # ============================================================================
 # RUN TESTS
 # ============================================================================
-
-if __name__ == "__main__":
-    # Run tests with pytest
-    pytest.main([__file__, "-v"])
+# Use pytest from command line: pytest sie_x/core/test_core.py -v

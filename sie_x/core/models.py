@@ -5,10 +5,8 @@ These Pydantic models are used throughout the system - engine, API, and SDK.
 All models include validation, serialization, and proper documentation.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
-from enum import Enum
 
 
 class Keyword(BaseModel):
@@ -42,23 +40,7 @@ class Keyword(BaseModel):
         default_factory=dict,
         description="Additional metadata"
     )
-    
-    @field_validator('score')
-    @classmethod
-    def validate_score(cls, v: float) -> float:
-        """Ensure score is between 0 and 1."""
-        if not 0.0 <= v <= 1.0:
-            raise ValueError(f"Score must be between 0 and 1, got {v}")
-        return v
-    
-    @field_validator('confidence')
-    @classmethod
-    def validate_confidence(cls, v: float) -> float:
-        """Ensure confidence is between 0 and 1."""
-        if not 0.0 <= v <= 1.0:
-            raise ValueError(f"Confidence must be between 0 and 1, got {v}")
-        return v
-    
+
     def __str__(self) -> str:
         """String representation of keyword."""
         return f"Keyword('{self.text}', score={self.score:.2f}, type={self.type})"

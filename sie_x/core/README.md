@@ -566,7 +566,7 @@ keywords = engine.extract(text, top_k=5)  # Instead of top_k=50
 ```python
 # Ensure package is in PYTHONPATH
 import sys
-sys.path.append('/path/to/SEI-X')
+sys.path.append('/path/to/SIE-X')
 
 from sie_x.core.simple_engine import SimpleSemanticEngine
 ```
@@ -595,6 +595,7 @@ spacy>=3.5.0                   # NER and linguistic analysis
 networkx>=3.0                  # Graph algorithms
 pydantic>=2.0.0                # Data validation
 numpy>=1.24.0                  # Numerical computing
+scipy>=1.10.0                  # Optional: enhances networkx performance
 ```
 
 ## License
