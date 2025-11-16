@@ -10,15 +10,18 @@ Run with:
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import time
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from collections import defaultdict
 import asyncio
+import json
 
 from sie_x.core.simple_engine import SimpleSemanticEngine
+from sie_x.core.streaming import StreamingExtractor, ChunkConfig
+from sie_x.core.multilang import MultiLangEngine
 from sie_x.core.models import (
     ExtractionRequest,
     ExtractionResponse,
@@ -53,8 +56,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global engine instance
+# Global engine instances
 engine: Optional[SimpleSemanticEngine] = None
+streaming_extractor: Optional[StreamingExtractor] = None
+multilang_engine: Optional[MultiLangEngine] = None
 
 # Simple rate limiting
 rate_limit_store: Dict[str, List[float]] = defaultdict(list)
@@ -130,21 +135,31 @@ async def add_process_time_header(request: Request, call_next):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the engine on startup."""
-    global engine, startup_time
-    
+    global engine, streaming_extractor, multilang_engine, startup_time
+
     logger.info("Starting SIE-X API server...")
     startup_time = datetime.now()
-    
+
     try:
         # Initialize the semantic engine
         logger.info("Loading SimpleSemanticEngine...")
         engine = SimpleSemanticEngine()
         logger.info("SimpleSemanticEngine loaded successfully")
-        
+
+        # Initialize streaming extractor
+        logger.info("Initializing StreamingExtractor...")
+        streaming_extractor = StreamingExtractor(engine=engine)
+        logger.info("StreamingExtractor initialized successfully")
+
+        # Initialize multi-language engine
+        logger.info("Initializing MultiLangEngine...")
+        multilang_engine = MultiLangEngine(auto_detect=True, cache_size=5)
+        logger.info("MultiLangEngine initialized successfully")
+
         # Test the engine
         test_keywords = engine.extract("test initialization", top_k=1)
         logger.info(f"Engine test successful: {len(test_keywords)} keywords extracted")
-        
+
     except Exception as e:
         logger.error(f"Failed to initialize engine: {e}", exc_info=True)
         raise
@@ -170,6 +185,9 @@ async def root():
         "endpoints": {
             "extract": "/extract",
             "batch": "/extract/batch",
+            "stream": "/extract/stream",
+            "multilang": "/extract/multilang",
+            "languages": "/languages",
             "health": "/health",
             "models": "/models",
             "stats": "/stats",
@@ -311,7 +329,7 @@ async def extract_batch(request: BatchExtractionRequest):
         )
         
         return results
-        
+
     except Exception as e:
         stats["errors"] += 1
         logger.error(f"Batch extraction error: {e}", exc_info=True)
@@ -319,6 +337,201 @@ async def extract_batch(request: BatchExtractionRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Batch extraction failed: {str(e)}"
         )
+
+
+@app.post("/extract/stream", tags=["extraction"])
+async def extract_stream(request: ExtractionRequest):
+    """
+    Stream keyword extraction for large documents.
+
+    Processes text in chunks and streams results using Server-Sent Events (SSE).
+    Useful for documents >10K words or real-time UI updates.
+
+    Args:
+        request: ExtractionRequest with text and options
+
+    Returns:
+        StreamingResponse with SSE events containing chunk results
+
+    Example SSE event:
+        data: {"chunk_id": 0, "keywords": [...], "progress": 50.0, ...}
+    """
+    if not streaming_extractor:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Streaming extractor not initialized"
+        )
+
+    # Get options or use defaults
+    options = request.options or ExtractionOptions()
+
+    async def event_generator():
+        """Generate Server-Sent Events for streaming."""
+        try:
+            async for chunk_result in streaming_extractor.extract_stream(
+                text=request.text,
+                top_k=options.top_k,
+                min_confidence=options.min_confidence,
+                merge_final=True
+            ):
+                # Format as SSE
+                data = json.dumps(chunk_result)
+                yield f"data: {data}\n\n"
+
+                # Update stats for merged result
+                if chunk_result.get('is_merged_result'):
+                    stats["total_extractions"] += 1
+
+            # Send completion event
+            yield "event: complete\ndata: {}\n\n"
+
+        except Exception as e:
+            stats["errors"] += 1
+            logger.error(f"Streaming error: {e}", exc_info=True)
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+
+@app.post("/extract/multilang", response_model=ExtractionResponse, tags=["extraction"])
+async def extract_multilang(request: ExtractionRequest):
+    """
+    Extract keywords with automatic language detection.
+
+    Automatically detects the language of the input text and uses
+    the appropriate spaCy model for that language.
+
+    Supported languages: en, es, fr, de, it, pt, nl, el, nb, lt
+
+    Args:
+        request: ExtractionRequest with text and options
+            - Add "language": "es" in metadata to force a specific language
+
+    Returns:
+        ExtractionResponse with keywords and detected language in metadata
+
+    Example:
+        {"text": "Hola mundo", "options": {"top_k": 5}}
+        -> Detects Spanish, returns Spanish keywords
+    """
+    if not multilang_engine:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Multi-language engine not initialized"
+        )
+
+    try:
+        start_time = time.time()
+
+        # Get options or use defaults
+        options = request.options or ExtractionOptions()
+
+        # Check if language is forced via metadata
+        forced_language = None
+        if request.metadata and 'language' in request.metadata:
+            forced_language = request.metadata['language']
+
+        # Extract keywords with language detection
+        keywords = multilang_engine.extract(
+            text=request.text,
+            language=forced_language,
+            top_k=options.top_k,
+            min_confidence=options.min_confidence,
+            include_entities=options.include_entities,
+            include_concepts=options.include_concepts
+        )
+
+        processing_time = time.time() - start_time
+
+        # Detect language for metadata (if not forced)
+        detected_lang = forced_language or multilang_engine.detect_language(request.text)
+
+        # Update stats
+        stats["total_extractions"] += 1
+        stats["total_processing_time"] += processing_time
+
+        # Build response
+        response = ExtractionResponse(
+            keywords=keywords,
+            processing_time=processing_time,
+            version="1.0.0",
+            metadata={
+                "text_length": len(request.text),
+                "url": request.url,
+                "detected_language": detected_lang,
+                "language_forced": forced_language is not None,
+                "options": options.model_dump()
+            }
+        )
+
+        logger.info(
+            f"Multilang extracted {len(keywords)} keywords in {processing_time:.3f}s "
+            f"(language: {detected_lang}, text length: {len(request.text)})"
+        )
+
+        return response
+
+    except ValueError as e:
+        stats["errors"] += 1
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        stats["errors"] += 1
+        logger.error(f"Multilang extraction error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Multilang extraction failed: {str(e)}"
+        )
+
+
+@app.get("/languages", tags=["monitoring"])
+async def list_languages():
+    """
+    List supported languages and multi-language engine statistics.
+
+    Returns:
+        Dictionary with supported languages and usage stats
+    """
+    if not multilang_engine:
+        return {
+            "status": "not_initialized",
+            "supported_languages": []
+        }
+
+    try:
+        stats = multilang_engine.get_stats()
+
+        return {
+            "status": "ready",
+            "supported_languages": stats['supported_languages'],
+            "loaded_languages": stats['loaded_languages'],
+            "auto_detect_enabled": stats['auto_detect_enabled'],
+            "default_language": stats['default_language'],
+            "statistics": {
+                "total_extractions": stats['total_extractions'],
+                "languages_detected": stats['languages_detected'],
+                "cache_hit_rate": stats['cache_hit_rate']
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing languages: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
 
 
 @app.get("/health", response_model=HealthResponse, tags=["monitoring"])
