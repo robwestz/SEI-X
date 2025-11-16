@@ -6,6 +6,7 @@ Supports dynamic model loading based on detected language.
 
 Supported languages (with spaCy models):
 - English: en_core_web_sm
+- Swedish: sv_core_news_sm
 - Spanish: es_core_news_sm
 - French: fr_core_news_sm
 - German: de_core_news_sm
@@ -20,6 +21,9 @@ Example:
     >>> from sie_x.core.multilang import MultiLangEngine
     >>>
     >>> engine = MultiLangEngine()
+    >>> keywords = engine.extract("Hej världen, detta är ett exempel")  # Auto-detects Swedish
+    >>> print(keywords[0].text)  # "världen"
+    >>>
     >>> keywords = engine.extract("Hola mundo, esto es un ejemplo")  # Auto-detects Spanish
     >>> print(keywords[0].text)  # "mundo"
 """
@@ -37,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Language code to spaCy model mapping
 SPACY_MODELS = {
     'en': 'en_core_web_sm',
+    'sv': 'sv_core_news_sm',  # Swedish
     'es': 'es_core_news_sm',
     'fr': 'fr_core_news_sm',
     'de': 'de_core_news_sm',
@@ -67,6 +72,7 @@ class LanguageDetector:
         # Common words for basic detection
         self.language_patterns = {
             'en': ['the', 'is', 'and', 'to', 'of', 'in', 'that', 'it', 'with'],
+            'sv': ['och', 'i', 'att', 'det', 'som', 'är', 'en', 'på', 'för', 'med', 'av', 'till', 'den', 'har', 'om', 'var'],
             'es': ['el', 'la', 'de', 'que', 'y', 'en', 'un', 'es', 'por', 'los'],
             'fr': ['le', 'de', 'un', 'et', 'être', 'à', 'il', 'avoir', 'ne', 'je'],
             'de': ['der', 'die', 'und', 'in', 'den', 'von', 'zu', 'das', 'mit', 'sich'],

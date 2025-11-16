@@ -410,16 +410,19 @@ async def extract_multilang(request: ExtractionRequest):
     Automatically detects the language of the input text and uses
     the appropriate spaCy model for that language.
 
-    Supported languages: en, es, fr, de, it, pt, nl, el, nb, lt
+    Supported languages: en, sv, es, fr, de, it, pt, nl, el, nb, lt
 
     Args:
         request: ExtractionRequest with text and options
-            - Add "language": "es" in metadata to force a specific language
+            - Add "language": "sv" in metadata to force a specific language
 
     Returns:
         ExtractionResponse with keywords and detected language in metadata
 
-    Example:
+    Examples:
+        {"text": "Hej världen", "options": {"top_k": 5}}
+        -> Detects Swedish, returns Swedish keywords
+
         {"text": "Hola mundo", "options": {"top_k": 5}}
         -> Detects Spanish, returns Spanish keywords
     """
