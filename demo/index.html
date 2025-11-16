@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIE-X Keyword Extraction Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8 max-w-6xl" x-data="sieXDemo()">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-900 mb-2">
+                🔍 SIE-X Keyword Extraction
+            </h1>
+            <p class="text-gray-600">
+                Semantic Intelligence Engine X - Extract meaningful keywords from any text
+            </p>
+        </div>
+
+        <!-- Main Card -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <!-- Input Section -->
+            <div class="mb-6">
+                <label class="block text-gray-700 font-semibold mb-2">
+                    📝 Enter Your Text
+                </label>
+                <textarea
+                    x-model="inputText"
+                    rows="8"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    placeholder="Paste your text here... (e.g., a news article, blog post, or any document)"
+                ></textarea>
+            </div>
+
+            <!-- Options -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                        Max Keywords
+                    </label>
+                    <input
+                        type="number"
+                        x-model="options.top_k"
+                        min="1"
+                        max="50"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                        Min Confidence
+                    </label>
+                    <input
+                        type="number"
+                        x-model="options.min_confidence"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                </div>
+                <div class="flex items-end">
+                    <label class="flex items-center">
+                        <input
+                            type="checkbox"
+                            x-model="options.include_entities"
+                            class="mr-2"
+                        />
+                        <span class="text-sm text-gray-700">Include Entities</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Extract Button -->
+            <div class="flex justify-center mb-6">
+                <button
+                    @click="extractKeywords()"
+                    :disabled="!inputText || loading"
+                    class="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                    x-show="!loading"
+                >
+                    🚀 Extract Keywords
+                </button>
+                <button
+                    disabled
+                    class="px-8 py-3 bg-gray-400 text-white font-semibold rounded-lg cursor-wait flex items-center"
+                    x-show="loading"
+                >
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Processing...
+                </button>
+            </div>
+
+            <!-- Error Message -->
+            <div x-show="error" class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-700" x-text="error"></p>
+            </div>
+
+            <!-- Results Section -->
+            <div x-show="keywords.length > 0" class="border-t pt-6">
+                <h2 class="text-2xl font-bold text-gray-900 mb-4">
+                    🔑 Extracted Keywords
+                </h2>
+                
+                <!-- Processing Info -->
+                <div class="mb-4 text-sm text-gray-600">
+                    <span>Found <strong x-text="keywords.length"></strong> keywords</span>
+                    <span x-show="processingTime"> in <strong x-text="processingTime.toFixed(3)"></strong> seconds</span>
+                </div>
+
+                <!-- Keywords Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <template x-for="(kw, index) in keywords" :key="index">
+                        <div class="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 hover:shadow-md transition-shadow">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="font-semibold text-gray-900" x-text="kw.text"></span>
+                                <span class="text-xs bg-blue-600 text-white px-2 py-1 rounded-full" x-text="kw.type"></span>
+                            </div>
+                            <div class="text-sm text-gray-600">
+                                <div>Score: <span class="font-medium" x-text="kw.score.toFixed(3)"></span></div>
+                                <div x-show="kw.count > 1">Occurrences: <span class="font-medium" x-text="kw.count"></span></div>
+                            </div>
+                            <!-- Score Bar -->
+                            <div class="mt-2 bg-gray-200 rounded-full h-2">
+                                <div 
+                                    class="bg-blue-600 h-2 rounded-full transition-all" 
+                                    :style="`width: ${kw.score * 100}%`"
+                                ></div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- Example Texts -->
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h2 class="text-xl font-bold text-gray-900 mb-4">📚 Try Example Texts</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button 
+                    @click="loadExample('tech')"
+                    class="p-4 text-left border border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                >
+                    <div class="font-semibold text-gray-900 mb-1">💻 Tech News</div>
+                    <div class="text-sm text-gray-600">AI and machine learning announcement</div>
+                </button>
+                <button 
+                    @click="loadExample('science')"
+                    class="p-4 text-left border border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                >
+                    <div class="font-semibold text-gray-900 mb-1">🔬 Scientific</div>
+                    <div class="text-sm text-gray-600">CRISPR gene-editing research</div>
+                </button>
+                <button 
+                    @click="loadExample('business')"
+                    class="p-4 text-left border border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                >
+                    <div class="font-semibold text-gray-900 mb-1">💼 Business</div>
+                    <div class="text-sm text-gray-600">Quarterly earnings report</div>
+                </button>
+                <button 
+                    @click="loadExample('sports')"
+                    class="p-4 text-left border border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                >
+                    <div class="font-semibold text-gray-900 mb-1">⚽ Sports</div>
+                    <div class="text-sm text-gray-600">NBA game highlights</div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-8 text-center text-gray-600 text-sm">
+            <p>Powered by SIE-X v1.0.0 | API: <a :href="apiUrl" class="text-blue-600 hover:underline" x-text="apiUrl"></a></p>
+            <p class="mt-2">
+                <a href="http://localhost:8000/docs" class="text-blue-600 hover:underline">API Documentation</a> | 
+                <a href="https://github.com/robwestz/SEI-X" class="text-blue-600 hover:underline">GitHub</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function sieXDemo() {
+            return {
+                apiUrl: 'http://localhost:8000',
+                inputText: '',
+                keywords: [],
+                loading: false,
+                error: '',
+                processingTime: 0,
+                options: {
+                    top_k: 10,
+                    min_confidence: 0.3,
+                    include_entities: true,
+                    include_concepts: true
+                },
+                
+                examples: {
+                    tech: `Apple Inc. announced its latest MacBook Pro featuring the new M3 chip. The Cupertino-based company claims 30% better performance than the previous generation. CEO Tim Cook highlighted the improved battery life and AI capabilities. The device includes advanced machine learning processors and neural engines for artificial intelligence tasks.`,
+                    
+                    science: `Researchers at MIT have developed a new CRISPR gene-editing technique that reduces off-target effects by 95%. The breakthrough could accelerate the development of gene therapies for inherited diseases like sickle cell anemia and muscular dystrophy. The team published their findings in Nature Biotechnology, demonstrating the precision and safety of the new method.`,
+                    
+                    business: `Amazon's Q4 earnings exceeded analyst expectations with $170 billion in revenue. The e-commerce giant saw significant growth in AWS cloud services and announced plans to expand its logistics network in Europe. The company's investment in artificial intelligence and machine learning has driven innovation across multiple business units.`,
+                    
+                    sports: `LeBron James scored 40 points in the Lakers' victory over the Golden State Warriors at the Staples Center. The NBA superstar demonstrated exceptional basketball skills and leadership throughout the game. Coach Frank Vogel praised the team's defensive strategy, while Stephen Curry's performance for the Warriors was notable despite the loss.`
+                },
+                
+                async extractKeywords() {
+                    this.loading = true;
+                    this.error = '';
+                    this.keywords = [];
+                    
+                    try {
+                        const response = await fetch(`${this.apiUrl}/extract`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                text: this.inputText,
+                                options: this.options
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`API error: ${response.status} ${response.statusText}`);
+                        }
+                        
+                        const data = await response.json();
+                        this.keywords = data.keywords || [];
+                        this.processingTime = data.processing_time || 0;
+                        
+                        if (this.keywords.length === 0) {
+                            this.error = 'No keywords found. Try with different text or lower min_confidence.';
+                        }
+                    } catch (error) {
+                        this.error = `Error: ${error.message}. Make sure the API is running at ${this.apiUrl}`;
+                        console.error('Extraction error:', error);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                loadExample(type) {
+                    this.inputText = this.examples[type];
+                    this.keywords = [];
+                    this.error = '';
+                }
+            }
+        }
+    </script>
+</body>
+</html>
