@@ -18,6 +18,7 @@ import time
 from collections import defaultdict
 
 from .models import Keyword
+from .utils import load_spacy_model
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -64,8 +65,7 @@ class SimpleSemanticEngine:
             raise
         
         try:
-            self.nlp = spacy.load(spacy_model)
-            logger.info(f"Loaded spaCy model: {spacy_model}")
+            self.nlp = load_spacy_model(spacy_model)
         except Exception as e:
             logger.error(f"Failed to load spaCy model: {e}")
             raise
