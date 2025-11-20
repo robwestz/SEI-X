@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  sie-x-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.minimal
+    container_name: sie-x-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./models:/app/models  # Cache for downloaded models
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - sie-x-network
+  
+  redis:
+    image: redis:7-alpine
+    container_name: sie-x-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - sie-x-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  sie-x-network:
+    driver: bridge

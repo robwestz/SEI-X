@@ -1,0 +1,22 @@
+# SIE-X Core Dependencies
+# Minimal requirements for the core extraction engine
+
+# Core ML libraries
+sentence-transformers>=2.2.0
+spacy>=3.5.0
+networkx>=3.0
+
+# Data validation and serialization
+pydantic>=2.0.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.10.0  # Optional: enhances networkx performance
+
+# Language detection (optional but recommended for production)
+# fasttext  # Uncomment for production-grade language detection (>95% accuracy)
+
+# Note: After installing, download models:
+# 1. spaCy models: python -m spacy download en_core_web_sm
+# 2. FastText model (if using fasttext):
+#    wget https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
