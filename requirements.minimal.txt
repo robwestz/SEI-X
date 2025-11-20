@@ -13,5 +13,10 @@ pydantic>=2.0.0
 numpy>=1.24.0
 scipy>=1.10.0  # Optional: enhances networkx performance
 
-# Note: After installing, download the spaCy model with:
-# python -m spacy download en_core_web_sm
+# Language detection (optional but recommended for production)
+# fasttext  # Uncomment for production-grade language detection (>95% accuracy)
+
+# Note: After installing, download models:
+# 1. spaCy models: python -m spacy download en_core_web_sm
+# 2. FastText model (if using fasttext):
+#    wget https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
