@@ -4,6 +4,9 @@ API middleware for auth, rate limiting, and request tracking.
 
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
+import json
+import time
+import logging
 import jwt
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -14,6 +17,10 @@ from slowapi.errors import RateLimitExceeded
 import redis.asyncio as redis
 from dataclasses import dataclass
 import hashlib
+import structlog
+
+# Set up logger
+logger = structlog.get_logger()
 
 # Security
 security = HTTPBearer()

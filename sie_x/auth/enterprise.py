@@ -3,6 +3,7 @@ Enterprise authentication with OIDC and SAML support.
 """
 
 from typing import Dict, Any, Optional, List
+import json
 import jwt
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer
