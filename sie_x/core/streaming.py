@@ -33,6 +33,7 @@ class ChunkConfig:
     chunk_size: int = 1000  # Words per chunk
     overlap: int = 100      # Overlap between chunks (words)
     min_chunk_size: int = 200  # Minimum chunk size to process
+    strategy: str = "smart"  # 'simple' (word-based) or 'smart' (structure-aware)
 
     def validate(self):
         """Validate chunk configuration."""
@@ -42,6 +43,8 @@ class ChunkConfig:
             raise ValueError(f"overlap ({self.overlap}) must be < chunk_size ({self.chunk_size})")
         if self.overlap < 0:
             raise ValueError(f"overlap ({self.overlap}) must be >= 0")
+        if self.strategy not in ('simple', 'smart'):
+            raise ValueError(f"strategy must be 'simple' or 'smart', got '{self.strategy}'")
 
 
 class StreamingExtractor:
@@ -83,11 +86,28 @@ class StreamingExtractor:
         """
         Split text into overlapping chunks.
 
+        Uses configured strategy: 'simple' (word-based) or 'smart' (structure-aware).
+
         Args:
             text: Input text
 
         Returns:
             List of chunk dicts with id, text, start_word, end_word
+        """
+        if self.chunk_config.strategy == "smart":
+            return self._smart_chunk(text)
+        else:
+            return self._simple_chunk(text)
+
+    def _simple_chunk(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Simple word-based chunking (original implementation).
+
+        Args:
+            text: Input text
+
+        Returns:
+            List of chunk dicts
         """
         words = text.split()
         total_words = len(words)
@@ -140,6 +160,294 @@ class StreamingExtractor:
         logger.info(f"Split text into {len(chunks)} chunks ({total_words} words)")
 
         return chunks
+
+    def _smart_chunk(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Smart structure-aware chunking (respects paragraphs, headers, sentences).
+
+        Strategy:
+        1. Split on paragraph boundaries (\n\n or \n for markdown)
+        2. Detect headers (lines starting with #)
+        3. Group paragraphs into chunks while respecting target size
+        4. Maintain overlap for context continuity
+        5. Fall back to sentence/word splitting for very long paragraphs
+
+        Args:
+            text: Input text
+
+        Returns:
+            List of chunk dicts
+        """
+        # Split into paragraphs (double newline or single newline for markdown)
+        paragraphs = []
+        current_para = []
+
+        for line in text.split('\n'):
+            line_stripped = line.strip()
+
+            # Empty line = paragraph boundary
+            if not line_stripped:
+                if current_para:
+                    paragraphs.append('\n'.join(current_para))
+                    current_para = []
+            # Markdown header = new paragraph
+            elif line_stripped.startswith('#'):
+                if current_para:
+                    paragraphs.append('\n'.join(current_para))
+                    current_para = []
+                paragraphs.append(line)  # Header as standalone paragraph
+            else:
+                current_para.append(line)
+
+        # Add final paragraph
+        if current_para:
+            paragraphs.append('\n'.join(current_para))
+
+        # If no clear paragraph structure, fall back to simple chunking
+        if len(paragraphs) <= 1:
+            logger.info("No clear paragraph structure detected, using simple chunking")
+            return self._simple_chunk(text)
+
+        # Count words in each paragraph
+        para_word_counts = [len(p.split()) for p in paragraphs]
+        total_words = sum(para_word_counts)
+
+        # If document is small, return as single chunk
+        if total_words <= self.chunk_config.chunk_size:
+            return [{
+                'chunk_id': 0,
+                'text': text,
+                'start_word': 0,
+                'end_word': total_words,
+                'is_final': True,
+                'total_chunks': 1
+            }]
+
+        # Group paragraphs into chunks
+        chunks = []
+        chunk_id = 0
+        current_chunk_paras = []
+        current_chunk_words = 0
+        word_position = 0
+        chunk_start_word = 0
+
+        # For overlap: keep last N paragraphs from previous chunk
+        overlap_paras = []
+        overlap_words = 0
+
+        for i, (para, para_words) in enumerate(zip(paragraphs, para_word_counts)):
+            # If single paragraph exceeds chunk size, split it
+            if para_words > self.chunk_config.chunk_size * 1.5:
+                # Flush current chunk if any
+                if current_chunk_paras:
+                    chunk_text = '\n\n'.join(current_chunk_paras)
+                    chunks.append({
+                        'chunk_id': chunk_id,
+                        'text': chunk_text,
+                        'start_word': chunk_start_word,
+                        'end_word': word_position,
+                        'is_final': False,
+                        'total_chunks': -1
+                    })
+                    chunk_id += 1
+
+                    # Calculate overlap for next chunk
+                    overlap_paras = self._get_overlap_paragraphs(current_chunk_paras, para_word_counts)
+                    overlap_words = sum(len(p.split()) for p in overlap_paras)
+
+                # Split the long paragraph by sentences
+                long_para_chunks = self._split_long_paragraph(para, para_words, word_position)
+                chunks.extend(long_para_chunks)
+                chunk_id += len(long_para_chunks)
+
+                word_position += para_words
+                current_chunk_paras = []
+                current_chunk_words = 0
+                chunk_start_word = word_position
+                overlap_paras = []
+                overlap_words = 0
+
+            # Check if adding this paragraph would exceed chunk size
+            elif current_chunk_words + para_words > self.chunk_config.chunk_size:
+                # Create chunk from accumulated paragraphs
+                if current_chunk_paras:
+                    chunk_text = '\n\n'.join(current_chunk_paras)
+                    chunks.append({
+                        'chunk_id': chunk_id,
+                        'text': chunk_text,
+                        'start_word': chunk_start_word,
+                        'end_word': word_position,
+                        'is_final': False,
+                        'total_chunks': -1
+                    })
+                    chunk_id += 1
+
+                    # Calculate overlap for next chunk
+                    overlap_paras = self._get_overlap_paragraphs(current_chunk_paras, para_word_counts)
+                    overlap_words = sum(len(p.split()) for p in overlap_paras)
+
+                # Start new chunk with overlap + current paragraph
+                current_chunk_paras = overlap_paras + [para]
+                chunk_start_word = word_position - overlap_words
+                current_chunk_words = overlap_words + para_words
+                word_position += para_words
+
+            else:
+                # Add paragraph to current chunk
+                current_chunk_paras.append(para)
+                current_chunk_words += para_words
+                word_position += para_words
+
+        # Add final chunk if any paragraphs remain
+        if current_chunk_paras:
+            chunk_text = '\n\n'.join(current_chunk_paras)
+            chunks.append({
+                'chunk_id': chunk_id,
+                'text': chunk_text,
+                'start_word': chunk_start_word,
+                'end_word': word_position,
+                'is_final': False,
+                'total_chunks': -1
+            })
+
+        # Mark last chunk and set total
+        if chunks:
+            chunks[-1]['is_final'] = True
+            for chunk in chunks:
+                chunk['total_chunks'] = len(chunks)
+
+        logger.info(f"Smart chunking: {len(chunks)} chunks from {len(paragraphs)} paragraphs ({total_words} words)")
+
+        return chunks
+
+    def _get_overlap_paragraphs(
+        self,
+        paragraphs: List[str],
+        para_word_counts: List[int]
+    ) -> List[str]:
+        """
+        Get last N paragraphs from previous chunk for overlap.
+
+        Args:
+            paragraphs: List of paragraph strings
+            para_word_counts: Word counts for each paragraph
+
+        Returns:
+            List of paragraphs for overlap
+        """
+        overlap_target = self.chunk_config.overlap
+        overlap_paras = []
+        overlap_words = 0
+
+        # Work backwards from end of paragraphs
+        for para in reversed(paragraphs):
+            para_words = len(para.split())
+            if overlap_words + para_words <= overlap_target:
+                overlap_paras.insert(0, para)
+                overlap_words += para_words
+            else:
+                # If we can't fit the whole paragraph, take last N words
+                if overlap_words < overlap_target:
+                    words_needed = overlap_target - overlap_words
+                    para_words_list = para.split()
+                    if len(para_words_list) > words_needed:
+                        partial = ' '.join(para_words_list[-words_needed:])
+                        overlap_paras.insert(0, partial)
+                break
+
+        return overlap_paras
+
+    def _split_long_paragraph(
+        self,
+        paragraph: str,
+        para_words: int,
+        start_word_pos: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Split a very long paragraph into sentence-based or word-based chunks.
+
+        Args:
+            paragraph: The long paragraph text
+            para_words: Word count of paragraph
+            start_word_pos: Starting word position in document
+
+        Returns:
+            List of chunk dicts for this paragraph
+        """
+        # Try sentence splitting first
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', paragraph)
+
+        if len(sentences) > 1:
+            # Use sentence-based chunking
+            chunks = []
+            current_chunk_sentences = []
+            current_chunk_words = 0
+            word_pos = start_word_pos
+            chunk_start = start_word_pos
+
+            for sentence in sentences:
+                sentence_words = len(sentence.split())
+
+                if current_chunk_words + sentence_words > self.chunk_config.chunk_size:
+                    if current_chunk_sentences:
+                        chunk_text = ' '.join(current_chunk_sentences)
+                        chunks.append({
+                            'chunk_id': -1,  # Will be renumbered by caller
+                            'text': chunk_text,
+                            'start_word': chunk_start,
+                            'end_word': word_pos,
+                            'is_final': False,
+                            'total_chunks': -1
+                        })
+
+                    current_chunk_sentences = [sentence]
+                    current_chunk_words = sentence_words
+                    chunk_start = word_pos
+                else:
+                    current_chunk_sentences.append(sentence)
+                    current_chunk_words += sentence_words
+
+                word_pos += sentence_words
+
+            # Add final sentence chunk
+            if current_chunk_sentences:
+                chunk_text = ' '.join(current_chunk_sentences)
+                chunks.append({
+                    'chunk_id': -1,
+                    'text': chunk_text,
+                    'start_word': chunk_start,
+                    'end_word': word_pos,
+                    'is_final': False,
+                    'total_chunks': -1
+                })
+
+            return chunks
+
+        else:
+            # No sentence structure, fall back to word splitting
+            words = paragraph.split()
+            chunks = []
+            start = 0
+            word_pos = start_word_pos
+
+            while start < len(words):
+                end = min(start + self.chunk_config.chunk_size, len(words))
+                chunk_words = words[start:end]
+                chunk_text = ' '.join(chunk_words)
+
+                chunks.append({
+                    'chunk_id': -1,
+                    'text': chunk_text,
+                    'start_word': word_pos + start,
+                    'end_word': word_pos + end,
+                    'is_final': False,
+                    'total_chunks': -1
+                })
+
+                start = end - self.chunk_config.overlap
+
+            return chunks
 
     async def extract_stream(
         self,

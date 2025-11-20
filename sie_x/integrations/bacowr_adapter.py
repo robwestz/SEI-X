@@ -374,7 +374,9 @@ class BACOWRAdapter:
         self,
         bridge: Dict[str, Any],
         serp_context: Optional[Dict[str, Any]] = None,
-        trust_level: str = "T1"
+        trust_level: str = "T1",
+        content: Optional[str] = None,
+        link_positions: Optional[List[tuple]] = None
     ) -> Dict[str, Any]:
         """
         Generate BACOWR v2 extension fields for BacklinkArticleOutput.
@@ -387,6 +389,8 @@ class BACOWRAdapter:
             bridge: Bridge topic from find_best_bridge()
             serp_context: SERP analysis data (optional)
             trust_level: Trust policy level (T1=public, T2=academic, T3=industry, T4=media)
+            content: Generated content text (for link density check, optional)
+            link_positions: List of (start, end) tuples for link positions in content (optional)
 
         Returns:
             Dict with BACOWR v2 extension fields:
@@ -423,7 +427,9 @@ class BACOWRAdapter:
             bridge=bridge,
             trust_level=trust_level,
             pub_analysis=pub_analysis,
-            tgt_analysis=tgt_analysis
+            tgt_analysis=tgt_analysis,
+            content=content,
+            link_positions=link_positions
         )
 
         # Generate qc_extension
@@ -500,7 +506,9 @@ class BACOWRAdapter:
         bridge: Dict[str, Any],
         trust_level: str,
         pub_analysis: Dict[str, Any],
-        tgt_analysis: Dict[str, Any]
+        tgt_analysis: Dict[str, Any],
+        content: Optional[str] = None,
+        link_positions: Optional[List[tuple]] = None
     ) -> Dict[str, Any]:
         """Generate links_extension for BACOWR."""
         # Get anchor candidates and calculate risk
@@ -540,7 +548,7 @@ class BACOWRAdapter:
         # Compliance checks
         compliance = {
             'lsi_quality_pass': self._check_lsi_quality(bridge, tgt_analysis),
-            'near_window_pass': True,  # Would check actual link density
+            'near_window_pass': self._check_near_window_density(content, link_positions),
             'publisher_fit_pass': self._check_publisher_fit(pub_analysis, bridge),
             'anchor_risk_acceptable': self._check_anchor_risk(preferred_anchor, anchor_risk_scores)
         }
@@ -648,6 +656,66 @@ class BACOWRAdapter:
         """Check if anchor risk is acceptable."""
         risk = risk_scores.get(anchor, 0.5)  # Default medium risk
         return risk < 0.7  # Acceptable if < 0.7
+
+    def _check_near_window_density(
+        self,
+        content: Optional[str],
+        link_positions: Optional[List[tuple]]
+    ) -> bool:
+        """
+        Check near-window link density (BACOWR compliance).
+
+        Rule: Link density in 150-char window around each link must be <= 20%
+
+        Args:
+            content: Generated content text (optional)
+            link_positions: List of (start, end) char positions for links (optional)
+
+        Returns:
+            True if passes (density <= 20% or no data to check), False otherwise
+        """
+        if not content or not link_positions or len(link_positions) == 0:
+            # If no content or positions provided, default to pass
+            # (will be checked later when actual content is available)
+            logger.debug("No content/link_positions for near_window check, defaulting to True")
+            return True
+
+        WINDOW_SIZE = 75  # 75 chars on each side = 150 char window
+        MAX_DENSITY = 0.20  # 20% maximum link density
+
+        total_window_chars = 0
+        total_link_chars = 0
+
+        for start, end in link_positions:
+            # Define window around this link
+            window_start = max(0, start - WINDOW_SIZE)
+            window_end = min(len(content), end + WINDOW_SIZE)
+            window_text = content[window_start:window_end]
+
+            # Count chars in this window
+            total_window_chars += len(window_text)
+
+            # Count link chars (only the part within this window)
+            link_start_in_window = max(0, start - window_start)
+            link_end_in_window = min(len(window_text), end - window_start)
+            link_chars_in_window = link_end_in_window - link_start_in_window
+            total_link_chars += link_chars_in_window
+
+        if total_window_chars == 0:
+            # Edge case: empty window
+            return True
+
+        # Calculate overall link density across all windows
+        density = total_link_chars / total_window_chars
+
+        passes = density <= MAX_DENSITY
+
+        if not passes:
+            logger.warning(f"Near-window link density too high: {density:.1%} (max: {MAX_DENSITY:.0%})")
+        else:
+            logger.debug(f"Near-window link density OK: {density:.1%}")
+
+        return passes
 
     def _estimate_ranking_difficulty(self, competition: str, features: List[str]) -> str:
         """Estimate ranking difficulty from SERP analysis."""

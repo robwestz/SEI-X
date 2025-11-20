@@ -8,6 +8,14 @@ import polyglot
 from transformers import AutoTokenizer, AutoModel
 import langdetect
 from dataclasses import dataclass
+import spacy
+from sentence_transformers import SentenceTransformer
+
+# Import spacy auto-download utility
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from core.utils import load_spacy_model
 
 
 @dataclass
@@ -139,7 +147,7 @@ class MultilingualEngine:
 
             # SpaCy or alternative
             if config.spacy_model:
-                models['nlp'] = spacy.load(config.spacy_model)
+                models['nlp'] = load_spacy_model(config.spacy_model)
             else:
                 # Use Stanza for languages without spaCy
                 import stanza
