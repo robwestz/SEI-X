@@ -3,11 +3,30 @@ Real-time streaming extraction pipeline.
 """
 
 import asyncio
-from typing import AsyncIterator, Optional, Dict, Any
+import json
+import logging
+from typing import AsyncIterator, Optional, Dict, Any, List
 from dataclasses import dataclass
-import aioredis
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-import msgpack
+
+try:
+    import redis.asyncio as aioredis
+except ImportError:
+    aioredis = None
+
+try:
+    from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+except ImportError:
+    AIOKafkaConsumer = None
+    AIOKafkaProducer = None
+
+try:
+    import msgpack
+except ImportError:
+    msgpack = None
+
+from sie_x.core.engine import SemanticIntelligenceEngine
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

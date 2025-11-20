@@ -460,7 +460,7 @@ API will be available at http://localhost:8000
 ## Using Transformers
 ```python
 from sie_x.core.engine import SemanticIntelligenceEngine
-from transformers.legal_transformer import LegalTransformer
+from sie_x.transformers import LegalTransformer
 
 # Create engine
 engine = SemanticIntelligenceEngine()
