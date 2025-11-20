@@ -3,6 +3,7 @@ sentence-transformers
 fastapi
 uvicorn
 redis
+aiomcache  # Optional: Memcached fallback for distributed caching
 numpy
 openai
 pandas
@@ -10,7 +11,6 @@ scikit-learn
 networkx
 transformers
 sqlalchemy
-asyncio
 httpx
 langchain
 optuna
@@ -27,3 +27,15 @@ backoff
 circuitbreaker
 llama-index
 spacy
+# Missing dependencies identified during audit
+pysyft>=0.8.0
+pyyaml
+ray[serve]>=2.0.0
+faiss-cpu
+fasttext
+slowapi
+psutil
+# Additional useful packages
+python-multipart
+aiofiles
+pydantic>=2.0.0

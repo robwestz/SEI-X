@@ -28,12 +28,20 @@ Example:
     >>> print(keywords[0].text)  # "mundo"
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import logging
 from functools import lru_cache
+import os
 
 from sie_x.core.models import Keyword, ExtractionOptions
 from sie_x.core.simple_engine import SimpleExtractionEngine
+
+# Optional fasttext import (falls back to pattern-based if not available)
+try:
+    import fasttext
+    FASTTEXT_AVAILABLE = True
+except ImportError:
+    FASTTEXT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +67,50 @@ DEFAULT_LANGUAGE = 'en'
 
 class LanguageDetector:
     """
-    Simple language detector using character n-grams and word patterns.
+    Hybrid language detector using fasttext (primary) with pattern fallback.
 
-    For production use, consider integrating:
-    - langdetect: pip install langdetect
-    - fasttext: pip install fasttext
-    - lingua-language-detector: pip install lingua-language-detector
+    Detection Strategy:
+    1. Try fasttext (if available) - high accuracy (>95%)
+    2. If confidence < threshold or fasttext unavailable, use pattern-based
+    3. Pattern-based uses common word matching (~75-80% accuracy)
+
+    Installation:
+        pip install fasttext
+        # Download model: https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin
     """
 
-    def __init__(self):
-        """Initialize language detector."""
-        # Common words for basic detection
+    # Fasttext language code mapping to our supported languages
+    FASTTEXT_MAPPING = {
+        '__label__en': 'en',
+        '__label__sv': 'sv',
+        '__label__es': 'es',
+        '__label__fr': 'fr',
+        '__label__de': 'de',
+        '__label__it': 'it',
+        '__label__pt': 'pt',
+        '__label__nl': 'nl',
+        '__label__el': 'el',
+        '__label__no': 'nb',  # Norwegian Bokmål
+        '__label__lt': 'lt'
+    }
+
+    def __init__(self, fasttext_model_path: Optional[str] = None):
+        """
+        Initialize language detector.
+
+        Args:
+            fasttext_model_path: Path to fasttext lid.176.bin model
+                                Default: looks in common locations
+        """
+        self.fasttext_model = None
+        self.fasttext_enabled = False
+
+        # Try to load fasttext model
+        if FASTTEXT_AVAILABLE:
+            self.fasttext_model = self._load_fasttext_model(fasttext_model_path)
+            self.fasttext_enabled = self.fasttext_model is not None
+
+        # Common words for pattern-based fallback
         self.language_patterns = {
             'en': ['the', 'is', 'and', 'to', 'of', 'in', 'that', 'it', 'with'],
             'sv': ['och', 'i', 'att', 'det', 'som', 'är', 'en', 'på', 'för', 'med', 'av', 'till', 'den', 'har', 'om', 'var'],
@@ -84,32 +125,112 @@ class LanguageDetector:
             'lt': ['ir', 'yra', 'kad', 'būti', 'su', 'į', 'iš', 'nei', 'ar', 'tai']
         }
 
-        logger.info("LanguageDetector initialized (pattern-based)")
+        mode = "hybrid (fasttext + pattern)" if self.fasttext_enabled else "pattern-based only"
+        logger.info(f"LanguageDetector initialized: {mode}")
 
-    def detect(self, text: str, top_n: int = 3) -> List[Dict[str, Any]]:
+    def _load_fasttext_model(self, model_path: Optional[str] = None) -> Optional[Any]:
         """
-        Detect language of text.
+        Load fasttext language identification model.
+
+        Args:
+            model_path: Path to lid.176.bin or None for auto-detection
+
+        Returns:
+            Loaded fasttext model or None if failed
+        """
+        if not FASTTEXT_AVAILABLE:
+            logger.warning("fasttext not installed. Install with: pip install fasttext")
+            return None
+
+        # Common model locations
+        search_paths = [
+            model_path,
+            'lid.176.bin',
+            os.path.expanduser('~/.fasttext/lid.176.bin'),
+            '/usr/share/fasttext/lid.176.bin',
+            os.path.join(os.path.dirname(__file__), '../../models/lid.176.bin')
+        ]
+
+        for path in search_paths:
+            if path and os.path.exists(path):
+                try:
+                    # Suppress fasttext warnings
+                    fasttext.FastText.eprint = lambda x: None
+                    model = fasttext.load_model(path)
+                    logger.info(f"Loaded fasttext model from: {path}")
+                    return model
+                except Exception as e:
+                    logger.warning(f"Failed to load fasttext model from {path}: {e}")
+
+        logger.warning(
+            "Fasttext model not found. Download from: "
+            "https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin"
+        )
+        return None
+
+    def _detect_fasttext(self, text: str, top_n: int = 3) -> List[Dict[str, Any]]:
+        """
+        Detect language using fasttext model.
 
         Args:
             text: Input text
-            top_n: Number of top language candidates to return
+            top_n: Number of top predictions
 
         Returns:
-            List of dicts with 'language' and 'confidence' (sorted by confidence)
+            List of dicts with 'language' and 'confidence'
         """
-        if not text or len(text.strip()) < 10:
-            # Too short to detect reliably
-            return [{'language': DEFAULT_LANGUAGE, 'confidence': 0.5}]
+        if not self.fasttext_model:
+            return []
 
+        # Clean text (fasttext works on single line)
+        clean_text = text.replace('\n', ' ').strip()
+
+        try:
+            # Predict top N languages
+            labels, confidences = self.fasttext_model.predict(clean_text, k=top_n)
+
+            results = []
+            for label, confidence in zip(labels, confidences):
+                # Map fasttext label to our language code
+                lang_code = self.FASTTEXT_MAPPING.get(label)
+
+                if lang_code and lang_code in SPACY_MODELS:
+                    results.append({
+                        'language': lang_code,
+                        'confidence': float(confidence),
+                        'method': 'fasttext'
+                    })
+
+            logger.debug(f"Fasttext detected: {results}")
+            return results
+
+        except Exception as e:
+            logger.warning(f"Fasttext detection failed: {e}")
+            return []
+
+    def _detect_pattern(self, text: str, top_n: int = 3) -> List[Dict[str, Any]]:
+        """
+        Detect language using pattern matching (fallback method).
+
+        Args:
+            text: Input text
+            top_n: Number of top predictions
+
+        Returns:
+            List of dicts with 'language' and 'confidence'
+        """
         # Lowercase and tokenize
         words = text.lower().split()
+
+        if not words:
+            return []
 
         # Count matches for each language
         scores = {}
         for lang, patterns in self.language_patterns.items():
             matches = sum(1 for word in words if word in patterns)
             # Normalize by text length
-            scores[lang] = matches / len(words) if words else 0
+            scores[lang] = matches / len(words)
 
         # Sort by score
         sorted_langs = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -120,15 +241,71 @@ class LanguageDetector:
             if score > 0:
                 results.append({
                     'language': lang,
-                    'confidence': min(score * 10, 1.0)  # Scale to 0-1
+                    'confidence': min(score * 10, 1.0),  # Scale to 0-1
+                    'method': 'pattern'
                 })
 
-        # Fallback to English if no matches
-        if not results:
-            results.append({'language': DEFAULT_LANGUAGE, 'confidence': 0.3})
-
-        logger.debug(f"Detected languages: {results}")
+        logger.debug(f"Pattern detected: {results}")
         return results
+
+    def detect(self, text: str, top_n: int = 3, fasttext_threshold: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        Detect language using hybrid approach (fasttext + pattern fallback).
+
+        Strategy:
+        1. Try fasttext first (if available and text is long enough)
+        2. If confidence < threshold, use pattern-based as well
+        3. Return combined results sorted by confidence
+
+        Args:
+            text: Input text
+            top_n: Number of top language candidates to return
+            fasttext_threshold: Minimum confidence to trust fasttext (default: 0.7)
+
+        Returns:
+            List of dicts with 'language', 'confidence', and 'method'
+        """
+        if not text or len(text.strip()) < 10:
+            # Too short to detect reliably
+            return [{'language': DEFAULT_LANGUAGE, 'confidence': 0.5, 'method': 'default'}]
+
+        results = []
+
+        # Try fasttext first
+        if self.fasttext_enabled:
+            fasttext_results = self._detect_fasttext(text, top_n=top_n)
+
+            if fasttext_results:
+                top_confidence = fasttext_results[0]['confidence']
+
+                if top_confidence >= fasttext_threshold:
+                    # High confidence - trust fasttext
+                    logger.debug(f"Using fasttext results (confidence: {top_confidence:.2f})")
+                    return fasttext_results
+                else:
+                    # Low confidence - use pattern as well
+                    logger.debug(f"Fasttext confidence low ({top_confidence:.2f}), using hybrid")
+                    results.extend(fasttext_results)
+
+        # Use pattern-based detection (either primary or fallback)
+        pattern_results = self._detect_pattern(text, top_n=top_n)
+        results.extend(pattern_results)
+
+        # If we have results from both methods, merge and sort
+        if results:
+            # Group by language, keep highest confidence
+            lang_map = {}
+            for r in results:
+                lang = r['language']
+                if lang not in lang_map or r['confidence'] > lang_map[lang]['confidence']:
+                    lang_map[lang] = r
+
+            # Sort by confidence
+            sorted_results = sorted(lang_map.values(), key=lambda x: x['confidence'], reverse=True)
+            return sorted_results[:top_n]
+
+        # Last resort fallback
+        return [{'language': DEFAULT_LANGUAGE, 'confidence': 0.3, 'method': 'default'}]
 
 
 class MultiLangEngine:
@@ -149,7 +326,8 @@ class MultiLangEngine:
         self,
         default_language: str = DEFAULT_LANGUAGE,
         auto_detect: bool = True,
-        cache_size: int = 5
+        cache_size: int = 5,
+        fasttext_model_path: Optional[str] = None
     ):
         """
         Initialize multi-language engine.
@@ -158,10 +336,11 @@ class MultiLangEngine:
             default_language: Default language code (e.g., 'en', 'es')
             auto_detect: Enable automatic language detection
             cache_size: Maximum number of language engines to keep in memory
+            fasttext_model_path: Path to fasttext lid.176.bin model (optional)
         """
         self.default_language = default_language
         self.auto_detect = auto_detect
-        self.detector = LanguageDetector() if auto_detect else None
+        self.detector = LanguageDetector(fasttext_model_path) if auto_detect else None
 
         # Cache of engines per language
         self.engines: Dict[str, SimpleExtractionEngine] = {}
