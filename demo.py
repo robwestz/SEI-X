@@ -3,7 +3,7 @@
 
 import asyncio
 from sie_x.core.engine import SemanticIntelligenceEngine
-from transformers.loader import TransformerLoader
+from sie_x.transformers import TransformerLoader
 
 async def main():
     print("🎯 SIE-X Demo")
@@ -21,7 +21,7 @@ async def main():
 
     # Demo 2: Legal transformation
     print("\n2. Legal AI Transformation:")
-    from transformers.legal_transformer import LegalTransformer
+    from sie_x.transformers import LegalTransformer
     legal = LegalTransformer()
     legal.inject(engine)
 
