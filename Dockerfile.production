@@ -1,0 +1,73 @@
+# Multi-stage Dockerfile for production-ready SIE-X
+
+# =============================================================================
+# Stage 1: Builder
+# =============================================================================
+FROM python:3.9-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libmagic1 \
+    libmagic-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy requirements
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir \
+        asyncpg==0.29.0 \
+        bcrypt==4.1.1 \
+        PyJWT==2.8.0 \
+        python-magic==0.4.27
+
+# Download spaCy models
+RUN python -m spacy download en_core_web_sm
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM python:3.9-slim
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y \
+    libmagic1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Create app user (non-root for security)
+RUN useradd -m -u 1000 siex && \
+    mkdir -p /app && \
+    chown -R siex:siex /app
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=siex:siex . /app/
+
+# Switch to non-root user
+USER siex
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run server
+CMD ["python", "-m", "uvicorn", "sie_x.api.secure_server:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "4"]
