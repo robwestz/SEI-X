@@ -19,11 +19,13 @@ from pydantic import BaseModel, EmailStr, Field
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-# Configuration
-# In production, these must be set via environment variables
-SECRET_KEY = os.getenv("SIE_X_SECRET_KEY", "dev_secret_key_change_in_production")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+from sie_x.config import get_config
+
+# Configuration from unified config
+_auth_cfg = get_config().auth
+SECRET_KEY = _auth_cfg.secret_key.get_secret_value()
+ALGORITHM = _auth_cfg.algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = _auth_cfg.access_token_expire_minutes
 API_KEY_NAME = "X-API-Key"
 
 # Security Schemes

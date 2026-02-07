@@ -19,6 +19,7 @@ from collections import defaultdict
 
 from .models import Keyword
 from .utils import load_spacy_model
+from ..config import get_config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,8 +45,8 @@ class SimpleSemanticEngine:
     
     def __init__(
         self,
-        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        spacy_model: str = "en_core_web_sm"
+        model_name: str = None,
+        spacy_model: str = None
     ):
         """
         Initialize the semantic engine.
@@ -54,6 +55,9 @@ class SimpleSemanticEngine:
             model_name: Sentence transformer model to use
             spacy_model: spaCy model to use for NER
         """
+        cfg = get_config().engine
+        model_name = model_name or cfg.simple_embedding_model
+        spacy_model = spacy_model or cfg.simple_spacy_model
         logger.info(f"Initializing SimpleSemanticEngine with {model_name}")
         
         # Load models
@@ -81,7 +85,7 @@ class SimpleSemanticEngine:
         self,
         text: str,
         top_k: int = 10,
-        min_confidence: float = 0.3,
+        min_confidence: float = None,
         include_entities: bool = True,
         include_concepts: bool = True
     ) -> List[Keyword]:
@@ -101,6 +105,8 @@ class SimpleSemanticEngine:
         Raises:
             ValueError: If text is empty or invalid
         """
+        if min_confidence is None:
+            min_confidence = get_config().engine.min_confidence
         # Validate input
         text = text.strip()
         if not text:
@@ -278,7 +284,7 @@ class SimpleSemanticEngine:
         self,
         keywords: List[Keyword],
         embeddings: np.ndarray,
-        similarity_threshold: float = 0.3
+        similarity_threshold: float = None
     ) -> nx.Graph:
         """
         Build similarity graph from keyword embeddings.
@@ -291,8 +297,10 @@ class SimpleSemanticEngine:
         Returns:
             NetworkX graph with keywords as nodes and similarities as edges
         """
+        if similarity_threshold is None:
+            similarity_threshold = get_config().engine.similarity_threshold
         graph = nx.Graph()
-        
+
         # Add nodes
         for i, keyword in enumerate(keywords):
             graph.add_node(i, keyword=keyword)
@@ -353,8 +361,8 @@ class SimpleSemanticEngine:
             pr_score = pagerank_scores.get(i, 0.0)
             freq_score = keyword.count / max_count
             
-            # Combined score: 70% PageRank, 30% frequency
-            combined_score = 0.7 * pr_score + 0.3 * freq_score
+            cfg = get_config().engine
+            combined_score = cfg.pagerank_weight * pr_score + cfg.frequency_weight * freq_score
             
             keyword.score = float(combined_score)
             keyword.confidence = float(pr_score)  # Use PageRank as confidence

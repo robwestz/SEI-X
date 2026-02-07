@@ -5,11 +5,15 @@ In-memory cache for lightweight usage and tests.
 from collections import OrderedDict
 from typing import Any, Optional
 
+from ..config import get_config
+
 
 class CacheManager:
     """Simple LRU cache with a max size limit."""
 
-    def __init__(self, max_size: int = 10000):
+    def __init__(self, max_size: int = None):
+        if max_size is None:
+            max_size = get_config().cache.max_size
         self.max_size = max_size
         self._store: OrderedDict[str, Any] = OrderedDict()
 

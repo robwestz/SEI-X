@@ -12,6 +12,7 @@ import asyncio
 # Import SEI-X components
 from ..core.engine import SemanticIntelligenceEngine
 from ..core.models import ModelMode
+from ..config import get_config
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -22,13 +23,14 @@ class AutoMLOptimizer:
 
     def __init__(
             self,
-            objective_metric: str = 'f1_score',
-            n_trials: int = 100,
-            n_jobs: int = -1
+            objective_metric: str = None,
+            n_trials: int = None,
+            n_jobs: int = None
     ):
-        self.objective_metric = objective_metric
-        self.n_trials = n_trials
-        self.n_jobs = n_jobs
+        cfg = get_config().automl
+        self.objective_metric = objective_metric or cfg.objective_metric
+        self.n_trials = n_trials if n_trials is not None else cfg.n_trials
+        self.n_jobs = n_jobs if n_jobs is not None else cfg.n_jobs
         self.study = None
         self.best_params = None
 

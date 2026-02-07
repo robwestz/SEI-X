@@ -1,0 +1,48 @@
+# SIE-X Core
+spacy>=3.5
+sentence-transformers>=2.2
+pydantic>=2.0
+pydantic-settings>=2.0
+networkx>=3.0
+numpy>=1.24
+torch>=2.0
+faiss-cpu>=1.7
+scikit-learn>=1.2
+transformers>=4.30
+
+# API
+fastapi>=0.100
+uvicorn>=0.22
+python-jose[cryptography]>=3.3
+passlib[bcrypt]>=1.7
+python-multipart>=0.0.6
+httpx>=0.24
+beautifulsoup4>=4.12
+slowapi>=0.1.8
+structlog>=23.1
+
+# Cache
+redis>=5.0
+
+# Monitoring
+prometheus-client>=0.17
+opentelemetry-api>=1.20
+opentelemetry-sdk>=1.20
+opentelemetry-exporter-otlp-proto-grpc>=1.20
+
+# Optional: Enterprise Auth
+# authlib>=1.2
+# python3-saml>=1.15
+# ldap3>=2.9
+
+# Optional: Streaming
+# aiokafka>=0.8
+# msgpack>=1.0
+# aiomcache>=0.8
+
+# Optional: AutoML & Agents
+# ray[serve]>=2.5
+# optuna>=3.2
+
+# Optional: Multilingual
+# fasttext>=0.9

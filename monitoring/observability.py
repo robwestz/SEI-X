@@ -16,6 +16,8 @@ from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+from sie_x.config import get_config
+
 # Configure structured logging
 structlog.configure(
     processors=[
@@ -76,9 +78,10 @@ trace.set_tracer_provider(TracerProvider())
 tracer = trace.get_tracer(__name__)
 
 # Add OTLP exporter for Jaeger/Tempo
+_mon_cfg = get_config().monitoring
 otlp_exporter = OTLPSpanExporter(
-    endpoint="localhost:4317",
-    insecure=True
+    endpoint=_mon_cfg.otlp_endpoint,
+    insecure=_mon_cfg.otlp_insecure
 )
 span_processor = BatchSpanProcessor(otlp_exporter)
 trace.get_tracer_provider().add_span_processor(span_processor)

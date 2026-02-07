@@ -29,6 +29,8 @@ import hashlib
 import logging
 from datetime import timedelta
 
+from ..config import get_config
+
 logger = logging.getLogger(__name__)
 
 # Optional Redis import
@@ -122,21 +124,22 @@ class RedisCache(CacheBackend):
     
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379",
-        default_ttl: int = 3600,
-        key_prefix: str = "siex:"
+        redis_url: str = None,
+        default_ttl: int = None,
+        key_prefix: str = None
     ):
         """
         Initialize Redis cache.
-        
+
         Args:
             redis_url: Redis connection URL
             default_ttl: Default TTL in seconds (1 hour)
             key_prefix: Prefix for all keys
         """
-        self.redis_url = redis_url
-        self.default_ttl = default_ttl
-        self.key_prefix = key_prefix
+        cfg = get_config().cache
+        self.redis_url = redis_url or cfg.redis_url
+        self.default_ttl = default_ttl if default_ttl is not None else cfg.default_ttl
+        self.key_prefix = key_prefix or cfg.key_prefix
         self.client: Optional[aioredis.Redis] = None
         self.enabled = REDIS_AVAILABLE
         
@@ -302,8 +305,8 @@ class MemcachedCache(CacheBackend):
     def __init__(
         self,
         servers: List[str] = None,
-        default_ttl: int = 3600,
-        key_prefix: str = "siex:"
+        default_ttl: int = None,
+        key_prefix: str = None
     ):
         """
         Initialize Memcached cache.
@@ -313,9 +316,10 @@ class MemcachedCache(CacheBackend):
             default_ttl: Default TTL in seconds (1 hour)
             key_prefix: Prefix for all keys
         """
-        self.servers = servers or ["localhost:11211"]
-        self.default_ttl = default_ttl
-        self.key_prefix = key_prefix
+        cfg = get_config().cache
+        self.servers = servers or cfg.memcached_servers
+        self.default_ttl = default_ttl if default_ttl is not None else cfg.default_ttl
+        self.key_prefix = key_prefix or cfg.key_prefix
         self.client: Optional[aiomcache.Client] = None
         self.enabled = MEMCACHED_AVAILABLE
 
@@ -468,10 +472,10 @@ class FallbackCache(CacheBackend):
 
     def __init__(
         self,
-        redis_url: str = "redis://localhost:6379",
+        redis_url: str = None,
         memcached_servers: List[str] = None,
-        default_ttl: int = 3600,
-        key_prefix: str = "siex:"
+        default_ttl: int = None,
+        key_prefix: str = None
     ):
         """
         Initialize fallback cache with multiple backends.
@@ -482,6 +486,11 @@ class FallbackCache(CacheBackend):
             default_ttl: Default TTL in seconds
             key_prefix: Prefix for all keys
         """
+        cfg = get_config().cache
+        redis_url = redis_url or cfg.redis_url
+        default_ttl = default_ttl if default_ttl is not None else cfg.default_ttl
+        key_prefix = key_prefix or cfg.key_prefix
+
         self.backends: List[CacheBackend] = []
         self.active_backend: Optional[CacheBackend] = None
         self.key_prefix = key_prefix
@@ -492,7 +501,7 @@ class FallbackCache(CacheBackend):
 
         # Try to initialize Memcached (fallback)
         if MEMCACHED_AVAILABLE:
-            servers = memcached_servers or ["localhost:11211"]
+            servers = memcached_servers or cfg.memcached_servers
             self.backends.append(MemcachedCache(servers, default_ttl, key_prefix))
 
         if not self.backends:

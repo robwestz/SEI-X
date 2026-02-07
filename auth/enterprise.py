@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 from datetime import datetime, timedelta
 
+from sie_x.config import get_config
+
 
 @dataclass
 class UserInfo:
@@ -247,8 +249,10 @@ class TokenManager:
         self.redis = redis_client
         self.secret = secret
 
-    async def create_token(self, user_info: UserInfo, ttl: int = 3600) -> str:
+    async def create_token(self, user_info: UserInfo, ttl: int = None) -> str:
         """Create JWT token for user."""
+        cfg = get_config().auth
+        ttl = ttl if ttl is not None else cfg.token_expiry_seconds
         payload = {
             'sub': user_info.id,
             'email': user_info.email,
@@ -259,7 +263,7 @@ class TokenManager:
             'iat': datetime.utcnow()
         }
 
-        token = jwt.encode(payload, self.secret, algorithm='HS256')
+        token = jwt.encode(payload, self.secret, algorithm=cfg.algorithm)
 
         # Store in Redis for validation
         await self.redis.setex(
@@ -277,7 +281,8 @@ class TokenManager:
     async def validate_token(self, token: str) -> Optional[UserInfo]:
         """Validate JWT token."""
         try:
-            payload = jwt.decode(token, self.secret, algorithms=['HS256'])
+            algo = get_config().auth.algorithm
+            payload = jwt.decode(token, self.secret, algorithms=[algo])
 
             # Check if token exists in Redis
             token_key = f"token:{payload['sub']}:{token[-8:]}"
@@ -300,7 +305,8 @@ class TokenManager:
     async def revoke_token(self, token: str):
         """Revoke a token."""
         try:
-            payload = jwt.decode(token, self.secret, algorithms=['HS256'])
+            algo = get_config().auth.algorithm
+            payload = jwt.decode(token, self.secret, algorithms=[algo])
             token_key = f"token:{payload['sub']}:{token[-8:]}"
             await self.redis.delete(token_key)
 

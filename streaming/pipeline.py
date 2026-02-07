@@ -25,6 +25,7 @@ except ImportError:
     msgpack = None
 
 from sie_x.core.engine import SemanticIntelligenceEngine
+from sie_x.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,27 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StreamConfig:
     """Streaming configuration."""
-    kafka_brokers: List[str]
-    input_topic: str
-    output_topic: str
-    redis_url: str
-    batch_size: int = 10
-    batch_timeout: float = 1.0
+    kafka_brokers: List[str] = None
+    input_topic: str = None
+    output_topic: str = None
+    redis_url: str = None
+    batch_size: int = None
+    batch_timeout: float = None
+
+    def __post_init__(self):
+        cfg = get_config().streaming
+        if self.kafka_brokers is None:
+            self.kafka_brokers = cfg.kafka_brokers
+        if self.input_topic is None:
+            self.input_topic = cfg.input_topic
+        if self.output_topic is None:
+            self.output_topic = cfg.output_topic
+        if self.redis_url is None:
+            self.redis_url = cfg.redis_url
+        if self.batch_size is None:
+            self.batch_size = cfg.batch_size
+        if self.batch_timeout is None:
+            self.batch_timeout = cfg.batch_timeout
 
 
 class StreamingPipeline:

@@ -50,6 +50,7 @@ from sie_x.monitoring.metrics import (
     KEYWORDS_EXTRACTED,
     ACTIVE_REQUESTS
 )
+from sie_x.config import get_config
 
 # Configure logging
 logging.basicConfig(
@@ -58,11 +59,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Config
+_api_cfg = get_config().api
+
 # Create FastAPI app
 app = FastAPI(
-    title="SIE-X API",
+    title=_api_cfg.title,
     description="Semantic Intelligence Engine X - Keyword Extraction API",
-    version="1.0.0",
+    version=_api_cfg.version,
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -73,7 +77,7 @@ app.mount("/metrics", get_metrics_app())
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=_api_cfg.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

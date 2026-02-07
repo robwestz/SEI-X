@@ -35,6 +35,7 @@ import os
 
 from sie_x.core.models import Keyword, ExtractionOptions
 from sie_x.core.simple_engine import SimpleExtractionEngine
+from sie_x.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,23 +51,11 @@ except ImportError:
     )
 
 
-# Language code to spaCy model mapping
-SPACY_MODELS = {
-    'en': 'en_core_web_sm',
-    'sv': 'sv_core_news_sm',  # Swedish
-    'es': 'es_core_news_sm',
-    'fr': 'fr_core_news_sm',
-    'de': 'de_core_news_sm',
-    'it': 'it_core_news_sm',
-    'pt': 'pt_core_news_sm',
-    'nl': 'nl_core_news_sm',
-    'el': 'el_core_news_sm',
-    'nb': 'nb_core_news_sm',  # Norwegian Bokmål
-    'lt': 'lt_core_news_sm'
-}
+# Language code to spaCy model mapping (from config)
+SPACY_MODELS = get_config().multilingual.spacy_models
 
 # Default fallback language
-DEFAULT_LANGUAGE = 'en'
+DEFAULT_LANGUAGE = get_config().multilingual.default_language
 
 
 class LanguageDetector:

@@ -32,14 +32,26 @@ security = HTTPBearer()
 limiter = Limiter(key_func=get_remote_address)
 
 
+from sie_x.config import get_config as _get_config
+
+
 @dataclass
 class AuthConfig:
     """Authentication configuration."""
-    jwt_secret: str
-    jwt_algorithm: str = "HS256"
-    token_expiry: int = 3600  # 1 hour
+    jwt_secret: str = None
+    jwt_algorithm: str = None
+    token_expiry: int = None
     api_keys_enabled: bool = True
     oauth_enabled: bool = True
+
+    def __post_init__(self):
+        cfg = _get_config().auth
+        if self.jwt_secret is None:
+            self.jwt_secret = cfg.secret_key.get_secret_value()
+        if self.jwt_algorithm is None:
+            self.jwt_algorithm = cfg.algorithm
+        if self.token_expiry is None:
+            self.token_expiry = cfg.token_expiry_seconds
 
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
@@ -134,15 +146,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self,
             app,
             cache: CacheBackend,
-            default_limit: str = "100/hour",
-            burst_limit: str = "10/minute",
-            skip_if_unavailable: bool = True
+            default_limit: str = None,
+            burst_limit: str = None,
+            skip_if_unavailable: bool = None
     ):
         super().__init__(app)
+        rl_cfg = _get_config().rate_limit
         self.cache = cache
-        self.default_limit = default_limit
-        self.burst_limit = burst_limit
-        self.skip_if_unavailable = skip_if_unavailable
+        self.default_limit = default_limit or rl_cfg.default_limit
+        self.burst_limit = burst_limit or rl_cfg.burst_limit
+        self.skip_if_unavailable = skip_if_unavailable if skip_if_unavailable is not None else rl_cfg.skip_if_unavailable
 
     async def dispatch(self, request: Request, call_next):
         # Skip rate limiting if cache unavailable (dev mode)

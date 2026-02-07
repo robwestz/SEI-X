@@ -26,6 +26,7 @@ from ..cache import CacheManager
 from ..chunking import DocumentChunker
 from ..graph import GraphOptimizer
 from ..monitoring import MetricsCollector
+from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -72,38 +73,42 @@ class SemanticIntelligenceEngine:
 
     def __init__(
             self,
-            mode: ModelMode = ModelMode.BALANCED,
+            mode: ModelMode = None,
             language_model: Optional[str] = None,
-            enable_gpu: bool = True,
-            cache_size: int = 10000,
-            batch_size: int = 32,
-            max_chunk_size: int = 512,
-            enable_monitoring: bool = True
+            enable_gpu: bool = None,
+            cache_size: int = None,
+            batch_size: int = None,
+            max_chunk_size: int = None,
+            enable_monitoring: bool = None
     ):
         """Initialize the enhanced semantic engine."""
-        self.mode = mode
-        self.batch_size = batch_size
-        self.max_chunk_size = max_chunk_size
+        cfg = get_config().engine
+        self.mode = mode or ModelMode(cfg.mode)
+        self.batch_size = batch_size if batch_size is not None else cfg.batch_size
+        self.max_chunk_size = max_chunk_size if max_chunk_size is not None else cfg.max_chunk_size
+        _enable_gpu = enable_gpu if enable_gpu is not None else cfg.enable_gpu
+        _cache_size = cache_size if cache_size is not None else cfg.cache_size
+        _enable_monitoring = enable_monitoring if enable_monitoring is not None else cfg.enable_monitoring
 
         # GPU Setup
-        self.device = torch.device("cuda" if enable_gpu and torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if _enable_gpu and torch.cuda.is_available() else "cpu")
         logger.info(f"SIE-X initialized on device: {self.device}")
 
         # Model Loading with GPU support
         self._load_models(language_model)
 
         # Initialize subsystems
-        self.cache = CacheManager(max_size=cache_size)
+        self.cache = CacheManager(max_size=_cache_size)
         self.chunker = DocumentChunker(
             max_tokens=max_chunk_size,
             overlap_ratio=0.1,
             tokenizer=self.tokenizer
         )
         self.graph_optimizer = GraphOptimizer()
-        self.metrics = MetricsCollector() if enable_monitoring else None
+        self.metrics = MetricsCollector() if _enable_monitoring else None
 
         # FAISS index for fast similarity search
-        self.embedding_dim = 768  # Standard BERT dimension
+        self.embedding_dim = cfg.embedding_dim
         self.vector_index = None
         self._init_vector_index()
 
@@ -111,7 +116,8 @@ class SemanticIntelligenceEngine:
         """Load all required models with proper error handling."""
         try:
             # SBERT Model
-            model_name = language_model or 'sentence-transformers/all-mpnet-base-v2'
+            cfg = get_config().engine
+            model_name = language_model or cfg.embedding_model
             self.embedder = SentenceTransformer(model_name)
             self.embedder.to(self.device)
 
@@ -127,7 +133,7 @@ class SemanticIntelligenceEngine:
 
     def _load_spacy_model(self):
         """Load spaCy with automatic download."""
-        models = ['en_core_web_lg', 'en_core_web_md', 'xx_ent_wiki_sm']
+        models = get_config().engine.spacy_models
 
         for model_name in models:
             try:
@@ -157,8 +163,10 @@ class SemanticIntelligenceEngine:
             top_k: int = 10,
             output_format: Literal['object', 'string', 'json'] = 'object',
             enable_clustering: bool = True,
-            min_confidence: float = 0.3
+            min_confidence: float = None
     ) -> Union[List[Keyword], List[str], Dict[str, Any]]:
+        if min_confidence is None:
+            min_confidence = get_config().engine.min_confidence
         """Async extraction with full feature set."""
         if self.metrics:
             self.metrics.start_timer("extraction")
@@ -215,7 +223,7 @@ class SemanticIntelligenceEngine:
             return cached
 
         # Chunk long documents
-        chunks = self.chunker.chunk(text) if len(text) > 5000 else [text]
+        chunks = self.chunker.chunk(text) if len(text) > get_config().engine.chunking_threshold else [text]
 
         # Process chunks in parallel
         chunk_results = await asyncio.gather(*[
@@ -337,7 +345,7 @@ class SemanticIntelligenceEngine:
             graph = self.graph_optimizer.optimize(graph)
 
         # Calculate PageRank scores
-        scores = nx.pagerank(graph, weight='weight', alpha=0.85)
+        scores = nx.pagerank(graph, weight='weight', alpha=get_config().engine.pagerank_alpha)
 
         # Apply semantic clustering
         if enable_clustering and len(candidate_list) > 5:
@@ -376,7 +384,7 @@ class SemanticIntelligenceEngine:
 
             # Find related terms
             keyword.related_terms = self._find_related_terms(
-                i, embeddings, candidate_texts, top_n=3
+                i, embeddings, candidate_texts, top_n=get_config().engine.related_terms_top_n
             )
 
         # Sort by score
@@ -435,7 +443,7 @@ class SemanticIntelligenceEngine:
         sim_matrix = cosine_similarity(embeddings)
 
         # Apply threshold to reduce noise
-        threshold = 0.3
+        threshold = get_config().engine.similarity_threshold
         sim_matrix[sim_matrix < threshold] = 0
 
         # Create graph
@@ -461,9 +469,10 @@ class SemanticIntelligenceEngine:
     def _semantic_clustering(self, embeddings: np.ndarray) -> np.ndarray:
         """Perform semantic clustering using DBSCAN."""
         # Use DBSCAN for density-based clustering
+        cfg = get_config().engine
         clustering = DBSCAN(
-            eps=0.3,
-            min_samples=2,
+            eps=cfg.dbscan_eps,
+            min_samples=cfg.dbscan_min_samples,
             metric='cosine'
         ).fit(embeddings)
 
@@ -655,10 +664,13 @@ class SemanticIntelligenceEngine:
             self,
             texts: List[str],
             gold_keywords: List[List[str]],
-            epochs: int = 3,
-            learning_rate: float = 2e-5
+            epochs: int = None,
+            learning_rate: float = None
     ) -> Dict[str, float]:
         """Fine-tune the embedding model for domain adaptation."""
+        cfg = get_config().engine
+        epochs = epochs if epochs is not None else cfg.finetune_epochs
+        learning_rate = learning_rate if learning_rate is not None else cfg.finetune_lr
         # This would require implementing a full training pipeline
         # For now, return a placeholder
         logger.info("Fine-tuning initiated (placeholder implementation)")

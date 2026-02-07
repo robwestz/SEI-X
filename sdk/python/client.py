@@ -21,6 +21,8 @@ from urllib.parse import urljoin
 import logging
 from pathlib import Path
 
+from sie_x.config import get_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,10 +46,10 @@ class SIEXClient:
     
     def __init__(
         self,
-        base_url: str = "http://localhost:8000",
-        timeout: float = 30.0,
+        base_url: str = None,
+        timeout: float = None,
         api_key: Optional[str] = None,
-        max_retries: int = 3
+        max_retries: int = None
     ):
         """
         Initialize SIE-X client.
@@ -58,10 +60,11 @@ class SIEXClient:
             api_key: Optional API key for authentication
             max_retries: Maximum number of retry attempts (default: 3)
         """
-        self.base_url = base_url.rstrip('/')
-        self.timeout = timeout
+        cfg = get_config().sdk
+        self.base_url = (base_url or cfg.base_url).rstrip('/')
+        self.timeout = timeout if timeout is not None else cfg.timeout
         self.api_key = api_key
-        self.max_retries = max_retries
+        self.max_retries = max_retries if max_retries is not None else cfg.max_retries
         self._client: Optional[httpx.AsyncClient] = None
         self._sync_client: Optional[httpx.Client] = None
     
